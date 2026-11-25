@@ -1,199 +1,54 @@
-# 🎯 Intelligent Resume–Job Matching System
+﻿# Advanced Hybrid RAG Resume–Job Intelligence
 
-An intelligent multi-stage **Information Retrieval (IR)** and **Learning-to-Rank (LTR)** system designed to improve resume recommendation by combining lexical retrieval, semantic search, neural reranking, and machine learning-based ranking.
+A modular Python project for searching resume and job documents and generating evidence-linked reports. It combines BM25, BGE embeddings, persistent Qdrant retrieval, reciprocal rank fusion, a BGE cross-encoder, and Groq-assisted generation. The system supports human decision-making; ranking scores are not hiring probabilities, and missing evidence does not prove that a person lacks a skill.
 
-Unlike traditional keyword-based resume search, this project integrates hybrid retrieval and ranking techniques to better capture recruiter intent and candidate skill relevance.
+## Architecture
 
----
+1. Preserve source documents and split them into sections and passages with stable identifiers and source offsets.
+2. Encode passages with `BAAI/bge-small-en-v1.5`; use CUDA when available, fall back to CPU, and cache normalized embeddings locally.
+3. Search passages in Qdrant and documents with BM25, aggregate dense hits to documents, and fuse rankings with reciprocal rank fusion. FAISS provides an exact-search reference for indexing experiments.
+4. Optionally rerank retrieved candidates using `BAAI/bge-reranker-base`.
+5. Optionally use Groq for query expansion, structured evidence-linked generation, or a bounded read-only tool-calling workflow. Citation checks verify source identifiers and exact quotations; they do not prove semantic claim support.
 
-## 📌 Overview
+The CLI provides indexing, search, question answering, and an agent. Search supports BM25, dense, and hybrid modes. Question answering provides naive, hybrid, and advanced configurations. Zero-shot and stepwise prompts are implemented; few-shot prompts require independently human-verified examples with matching evidence.
 
-Recruiters often rely on keyword matching, which struggles to identify semantically relevant candidates.
+## Setup
 
-This project addresses that challenge by building a **multi-stage ranking pipeline** that progressively refines candidate retrieval through:
+Use Python on Windows and install the listed dependencies in a virtual environment:
 
-- Query Expansion
-- Hybrid Lexical + Semantic Retrieval
-- Neural Reranking
-- Learning-to-Rank Optimization
-
-The final output is a ranked list of the **Top-K most relevant resumes** for a given job description.
-
----
-
-# 🏗️ System Architecture
-
-```
-                   Job Description
-                          │
-                          ▼
-        ┌─────────────────────────────────┐
-        │  Query Expansion (Flan-T5)      │
-        └─────────────────────────────────┘
-                          │
-                          ▼
-        ┌─────────────────────────────────┐
-        │ Hybrid Retrieval                │
-        │                                 │
-        │ • BM25 (Sparse Search)          │
-        │ • BGE-Large + FAISS             │
-        └─────────────────────────────────┘
-                          │
-                          ▼
-            Reciprocal Rank Fusion (RRF)
-                          │
-                          ▼
-        ┌─────────────────────────────────┐
-        │ BGE Cross Encoder               │
-        │ Neural Re-ranking               │
-        └─────────────────────────────────┘
-                          │
-                          ▼
-        ┌─────────────────────────────────┐
-        │ LightGBM LambdaRank             │
-        │ Final Learning-to-Rank Stage    │
-        └─────────────────────────────────┘
-                          │
-                          ▼
-             Top-K Ranked Resume Results
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
----
+Select a PyTorch build compatible with your NVIDIA driver, or use CPU. See the [official PyTorch installation guide](https://pytorch.org/get-started/locally/). Start Qdrant using `docker compose up -d` when Docker is available. Qdrant server storage is persistent; embedded local mode must not be assumed to behave like server HNSW indexing.
 
-# 🚀 Key Features
+Copy `.env.example` to `.env` and configure the required environment variables. Keep credentials out of version control. `GROQ_MODEL` and `QDRANT_URL` are configurable. Model artifacts and embedding caches remain local.
 
-- Multi-stage hybrid retrieval pipeline
-- Query expansion using Flan-T5
-- Sparse retrieval using BM25
-- Dense semantic retrieval using BGE-Large + FAISS
-- Reciprocal Rank Fusion (RRF)
-- Neural reranking using BGE Cross-Encoder
-- Learning-to-Rank optimization using LightGBM LambdaRank
-- Interactive Gradio interface
-- Evaluation using standard Information Retrieval metrics
+## Data and privacy
 
----
+No resumes, job descriptions, annotation worksheets, dataset files, model weights, vector storage, or credentials are distributed in this repository. Bring source data only after verifying its license and privacy requirements. The JSONL corpus format contains a unique `id`, `kind` (`resume` or `job`), and original `text` per document. Dataset adapters are provided in `scripts/`; preserve original files and provenance separately.
 
-# 🛠️ Tech Stack
+The larger local experiments used the researchers' [Djinni recruitment corpus](https://aclanthology.org/2024.unlp-1.2/), published in English and Ukrainian partitions under MIT-labeled terms. The authors identify residual personal or protected attributes. A smaller separate research dataset is also documented in [DATASET_AUDIT.md](DATASET_AUDIT.md). Dataset availability or redaction does not by itself establish permission to transmit personal data to Groq. Review rights and privacy before external processing. The `--allow-external-data` option enables a request; it does not grant permission or anonymize data.
 
-## Languages
+## CLI
 
-- Python
+With a locally prepared corpus and Qdrant server:
 
-## Retrieval
-
-- BM25
-- FAISS
-- Reciprocal Rank Fusion (RRF)
-
-## NLP Models
-
-- Flan-T5
-- BGE-Large Embeddings
-- BGE Cross Encoder
-
-## Machine Learning
-
-- LightGBM LambdaRank
-- Scikit-learn
-
-## Libraries
-
-- Hugging Face Transformers
-- Sentence Transformers
-- Pandas
-- NumPy
-- Gradio
-
----
-
-# 📊 Learning-to-Rank Features
-
-The LambdaRank model uses engineered relevance features including:
-
-- BM25 score
-- Dense embedding similarity
-- Cross-Encoder relevance score
-- Skill overlap score
-- Job title alignment
-- Query length normalization
-- Resume length normalization
-
----
-
-# 📈 Evaluation
-
-The pipeline was evaluated using standard Information Retrieval metrics.
-
-### Self-Retrieval Performance
-
-| Metric | Score |
-|---------|------:|
-| Precision@1 | **0.94** |
-| Recall@10 | **0.99** |
-| NDCG@10 | **0.964** |
-| MAP | **0.956** |
-| MRR | **0.956** |
-
-> These results demonstrate the effectiveness of the hybrid retrieval and ranking pipeline in retrieving highly relevant resumes from the corpus.
-
----
-
-# 📂 Repository Structure
-
-```
-.
-├── notebooks/
-├── data/
-├── models/
-├── evaluation/
-├── app/
-├── README.md
-└── requirements.txt
+```powershell
+python main.py --corpus data\processed\documents.jsonl --collection my_documents index
+python main.py --corpus data\processed\documents.jsonl --collection my_documents search "Python developer" --kind resume --mode hybrid
+python main.py --corpus data\processed\documents.jsonl --collection my_documents ask "Your question" --mode advanced --allow-external-data
+python main.py --corpus data\processed\documents.jsonl --collection my_documents agent "Your question" --allow-external-data
 ```
 
----
+The indexer upserts stable chunk IDs but does not delete obsolete chunks. Use a new collection when the corpus or chunking changes. Treat source documents as untrusted data. Inspect outputs and citations before relying on them.
 
-# ⚙️ Installation
+## Verified infrastructure and evaluation status
 
-Clone the repository
+A local, fixed-seed Djinni sample of 10,000 candidate profiles and 200 jobs produced 19,988 chunks. On 200 job queries, Qdrant's nearest-neighbor agreement with FAISS exact search was 0.9990 at 10 and 0.9995 at 20. A separate filtered query incremented Qdrant's HNSW graph-search telemetry. These are infrastructure checks on one sample, not resume–job relevance or hiring accuracy; other queries may use different search plans. The sampled and earlier source-ordered runs overlap and are not independent validation splits.
 
-```bash
-git clone https://github.com/sa-99nje-ev/intelligent-resume-matching-system.git
+An RTX 4050 Laptop GPU was verified with a CUDA-enabled PyTorch environment. Naive, hybrid, advanced, and stepwise RAG and the bounded agent were demonstrated on a short public-domain U.S. Bureau of Labor Statistics passage. Source-reference checks passed on the recorded demonstrations; this is not an independent generation-quality evaluation.
 
-cd intelligent-resume-matching-system
-```
-
-Install dependencies
-
-```bash
-pip install torch transformers sentence-transformers
-pip install faiss-cpu rank-bm25 lightgbm
-pip install scikit-learn pandas numpy gradio tqdm
-```
-
-Run the notebook or launch the Gradio application.
-
----
-
-# 🔮 Future Work
-
-- Fine-tune retrieval models on domain-specific resume datasets
-- Incorporate Graph Neural Networks for candidate relationship modeling
-- Deploy as a scalable REST API
-- Extend to multilingual resume matching
-- Integrate LLM-based explanation generation for recruiter recommendations
-
----
-
-# 👨‍💻 Author
-
-**Sanjeev Rao**
-
-GitHub: https://github.com/sa-99nje-ev
-
----
-
-# 📄 License
-
-This project is intended for academic and educational purposes.
+Independent human relevance judgments, leakage-safe validation and test splits, controlled semantic retrieval ablations, human-assessed RAG and prompt quality, and verified few-shot examples remain pending. Do not treat unjudged pairs as irrelevant, derive labels from embeddings, or use the same model as the sole judge of its answers. [ANNOTATION_GUIDE.md](ANNOTATION_GUIDE.md) describes the local human-review workflow. The experimental notebook retains its existing code and explanations; local data and result files referenced by some cells are intentionally excluded and must be prepared separately.
