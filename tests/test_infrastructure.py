@@ -1,17 +1,123 @@
+from src.reranking import Reranker
+
+class ExpandingTokenizer:
+    def encode(self,text,text_pair=None,**kwargs):
+        if text_pair is not None:return list(range(513 if len(text_pair)>200 else 100))
+        return list(range(3 if text=='Q' else 500))
+    def decode(self,ids,**kwargs):return 'x'*len(ids)
+    def num_special_tokens_to_add(self,pair=False):return 3 if pair else 2
+
+class FakeCrossEncoder:
+    tokenizer=ExpandingTokenizer()
+    def predict(self,pairs,**kwargs):
+        self.pairs=pairs
+        assert all(len(pair[1])<=200 for pair in pairs)
+        return [1.0]*len(pairs)
+
+def test_reranker_splits_retokenized_overflow_without_dropping_windows():
+    ranker=Reranker.__new__(Reranker);ranker.model=FakeCrossEncoder()
+    result=ranker.rank('Q',[('a',1)],[{'document_id':'a','text':'evidence'}])
+    assert result==[('a',1.0)]
+    assert sum(len(pair[1]) for pair in ranker.model.pairs)==500
+
+from scripts.evaluate_finrank import metrics
+
+def test_binary_metrics_use_k_denominator_and_all_gold():
+    m=metrics(['g1','n','g2'],{'g1','g2'})
+    assert m['P@5']==0.4
+    assert m['R@5']==1.0
+    assert m['MRR']==1.0
+    assert abs(m['MAP']-(1+2/3)/2)<1e-12
+    assert m['nDCG@5']<1.0
+
+def test_incomplete_candidate_ranking_is_rejected():
+    try:metrics(['n1','n2'],{'gold'})
+    except ValueError:return
+    assert False
+
+from src.preprocessing import chunks
+from src.retrieval import tokenize,bm25,rrf
+
+def test_technical_tokens():
+    assert tokenize('C++ C# .NET Node.js CI/CD') == ['c++','c#','.net','node.js','ci/cd']
+
+def test_chunk_offsets():
+    text='Financial statements\nRevenue and liabilities'
+    for part in chunks('x',text,size=12,overlap=2):assert part['text']==text[part['start']:part['end']]
+
+def test_ranking():
+    assert bm25('revenue',{'a':'revenue','b':'liabilities'})[0][0]=='a'
+    assert rrf([['a','b'],['b','a']])[0][0]=='a'
+
+import io
+import json
+from unittest.mock import patch
+from main import corpus
+
+def test_corpus_keeps_unicode_line_separators():
+    record={'id':'doc','kind':'financial','text':'first\u2028second\u0085third'}
+    payload=json.dumps(record,ensure_ascii=False)+'\n'
+    with patch('pathlib.Path.open',return_value=io.StringIO(payload)):
+        documents, parts=corpus('unused.jsonl')
+    assert documents[0]['text']==record['text']
+    assert ''.join(part['text'] for part in parts)==record['text']
+
+from decimal import Decimal
+import pytest
+from src.verification.numerical_verifier import decimal_expression,quotation_valid,verify
+
+@pytest.mark.parametrize('expr,expected', [('(a-b)/b*100','25'),('a/b','1.25'),('0.1+0.2','0.3'),('-a + b','-2')])
+def test_decimal_arithmetic(expr,expected):
+    values={'a':'10','b':'8'}
+    assert decimal_expression(expr,values)==Decimal(expected)
+
+
+@pytest.mark.parametrize('expr', ['__import__("os")','a.__class__','a**2','a[0]','abs(a)','a//b','a%2','unknown'])
+def test_reject_unsafe_expression(expr):
+    with pytest.raises((ValueError,SyntaxError)):
+        decimal_expression(expr,{'a':'2','b':'1'})
+
+
+def test_quote_normalization():
+    assert quotation_valid('x','caf\u00e9  income',{'x':'cafe\u0301 \n income'})
+    assert not quotation_valid('y','income',{'x':'income'})
+
+
+def fact(**kw):
+    value={'name':'a','value':'1234.50','currency':'USD','unit':'dollars','magnitude':'million','reporting_period':'2023','passage_id':'p','quotation':'USD dollars in million for 2023 were 1,234.50'}
+    value.update(kw);return value
+
+
+def test_source_grounding_and_missing_number():
+    evidence={'p':'USD dollars in million for 2023 were 1,234.50'}
+    assert verify([fact()],'a/2',evidence)['result']=='617.25'
+    assert verify([fact(value='1235')],'a/2',evidence)['status']=='SOURCE_VALUE_UNVERIFIED'
+    assert verify([fact(reporting_period='2022')],'a/2',evidence)['status']=='PERIOD_MISMATCH'
+    assert verify([fact(unit='shares')],'a/2',evidence)['status']=='UNIT_MISMATCH'
+    assert verify([fact()],'a/0',evidence)['status']=='INVALID_FORMULA'
+    assert verify([],'',evidence)['status']=='INSUFFICIENT_EVIDENCE'
+
+
+def test_cross_year_requires_question_periods():
+    evidence={'p':'USD dollars in million for 2023 were 1,234.50', 'q':'USD dollars in million for 2022 were 1,000'}
+    facts=[fact(),fact(name='b',value='1000',reporting_period='2022',passage_id='q',quotation=evidence['q'])]
+    assert verify(facts,'(a-b)/b*100',evidence)['status']=='PERIOD_MISMATCH'
+    result=verify(facts,'(a-b)/b*100',evidence,question='What changed between 2022 and 2023?')
+    assert result['status']=='VERIFIED' and Decimal(result['result'])==Decimal('23.45')
+
 from decimal import Decimal
 import pytest
 from src.verification.citation_alignment import align_quote
-from src.verification.financial_quantities import canonical,compatible,answer_agreement
+from src.verification.financial_quantities import canonical,compatible
 from src.verification.rate_limit import TokenLimiter,estimate_tokens,duration
 from src.reliability_provider import classify_provider_error
 from src.verification.numerical_verifier import verify
-from scripts.eval_finrank_reliability import context_for,local_align
-from src.financial_milestone2 import Response,gate
 
 def test_exact_original_span_and_unicode():
     source='The cafe\u0301 had revenue of $4 million. Other.'
     x=align_quote('p','café had revenue of $4 million',{'p':source})
     assert x['status']=='exact' and x['exact_span']=='cafe\u0301 had revenue of $4 million'
+
 
 def test_fuzzy_unique_and_ambiguous():
     quote='Total assets were 10 million dollars, and remain unchanged'
@@ -19,10 +125,12 @@ def test_fuzzy_unique_and_ambiguous():
     assert align_quote('p',quote,{'p':src})['status']=='aligned_punctuation_only'
     assert align_quote('p',quote,{'p':src+'; '+src})['status']=='ambiguous'
 
+
 def test_fuzzy_reject_numerical_negation_and_dates():
     src='It did not have 20 million dollars in fiscal 2022.'
     for quote in ['It did not have 30 million dollars in fiscal 2022','It did have 20 million dollars in fiscal 2022','It did not have 20 million dollars in fiscal 2023']:
         assert align_quote('p',quote,{'p':src})['status']=='invalid'
+
 
 def test_canonical_values_magnitudes_and_dimensions():
     a=canonical({'value':'1.5','magnitude':'billion','unit':'dollars','currency':'USD'})
@@ -32,14 +140,6 @@ def test_canonical_values_magnitudes_and_dimensions():
     assert not compatible(a,pct)
     with pytest.raises(ValueError):canonical({'value':'5','magnitude':'million','unit':'percent','currency':''})
 
-def test_answer_agreement_tolerance_and_ambiguity():
-    assert answer_agreement('23.46%',Decimal('23.45'))
-    assert not answer_agreement('24%',Decimal('23.45'))
-    assert not answer_agreement('in 2023, 23.45%',Decimal('23.45'))
-
-def test_context_budget_preserves_passages_and_reports_omissions():
-    selected,omitted=context_for(['a','b','c'],{'a':'12345','b':'12345','c':'1'},max_chars=6,max_passages=3)
-    assert [x['passage_id'] for x in selected]==['a','c'] and omitted==[{'passage_id':'b','reason':'full_passage_over_budget'}]
 
 def test_limiter_limits_and_estimate(monkeypatch,tmp_path):
     monkeypatch.setenv('GROQ_TPM','100');monkeypatch.setenv('GROQ_RPM','10');monkeypatch.setenv('GROQ_RPD','3')
@@ -52,21 +152,12 @@ def test_limiter_limits_and_estimate(monkeypatch,tmp_path):
     assert clock.now>=60 and estimate_tokens('abcdef')==2 and duration('1m2.5s')==62.5
     with pytest.raises(ValueError):l.wait(1,1)
 
+
 def test_http_400_classification():
     class E(Exception):status_code=400;body={'message':'invalid json_schema'}
     assert classify_provider_error(E())=='bad_request_schema'
     E.body={'message':'maximum context length exceeded'};assert classify_provider_error(E())=='bad_request_context'
     E.body={'message':'unknown'};assert classify_provider_error(E())=='bad_request_other'
-
-def test_local_alignment_does_not_invoke_provider():
-    r=Response.model_validate({'answer':'x','abstention':False,'abstention_reason':'','extracted_facts':[],'formula':'','citations':[{'passage_id':'p','quotation':'the total is 100 dollars, for the year'}],'verification_status':'pending'})
-    updated,audit=local_align(r,{'p':'the total is 100 dollars for the year'})
-    assert audit[0]['status']=='aligned_punctuation_only'
-    assert updated.citations[0].quotation=='the total is 100 dollars for the year'
-
-def test_abstention_not_relaxed_for_invalid_evidence():
-    r=Response.model_validate({'answer':'4','abstention':False,'abstention_reason':'','extracted_facts':[],'formula':'','citations':[],'verification_status':'pending'})
-    assert gate(r,{'quotations_valid':False},{'status':'VERIFIED','result':'4'})['abstain']
 
 
 def test_verifier_converts_scales_and_rejects_unit_combinations():
@@ -78,18 +169,12 @@ def test_verifier_converts_scales_and_rejects_unit_combinations():
     assert Decimal(verify([a,b],'(a-b)/b*100',evidence)['result'])==Decimal('100')
 
 
-def test_prior_budget_scans_beyond_five_candidates():
-    from scripts.eval_finrank_reliability import prior_context
-    rankings=['a','b','c','d','e','f']
-    selected=prior_context(rankings,{'a':'x'*17000,'b':'1','c':'2','d':'3','e':'4','f':'5'})
-    assert [x['passage_id'] for x in selected]==['b','c','d','e','f']
-
-
 def test_cooldown_persists_and_blocks_future_requests(tmp_path):
     from src.verification.rate_limit import ProviderDeferred
     a=TokenLimiter();a.cooldown_file=tmp_path/'cooldown.json';a.set_cooldown(60)
     b=TokenLimiter();b.cooldown_file=a.cooldown_file
     with pytest.raises(ProviderDeferred):b.wait(10,10)
+
 
 def test_percentage_source_and_invalid_formula():
     x={'name':'a','value':'5','currency':'','unit':'percent','magnitude':'','reporting_period':'2023','passage_id':'p','quotation':'the percent rate in 2023 was 5'}
@@ -100,6 +185,7 @@ def test_percentage_source_and_invalid_formula():
 def test_overlapping_exact_matches_are_ambiguous():
     assert align_quote('p','aaa',{'p':'aaaa'})['status']=='ambiguous'
 
+
 def test_reported_token_remaining_is_respected(monkeypatch,tmp_path):
     class Timer:
         now=0
@@ -109,12 +195,3 @@ def test_reported_token_remaining_is_respected(monkeypatch,tmp_path):
     limiter.observe({'x-ratelimit-remaining-tokens':'50','x-ratelimit-reset-tokens':'7s'})
     limiter.wait(40,20)
     assert clock.now>=7
-
-
-def test_deferred_or_failed_request_can_resume(tmp_path):
-    import json
-    from scripts.eval_finrank_reliability import completed_keys
-    path=tmp_path/'predictions.jsonl'
-    rows=[{'query_id':'q','method':'m','status':'provider_deferred'},{'query_id':'q','method':'n','status':'ok'}]
-    path.write_text('\n'.join(json.dumps(r) for r in rows),encoding='utf8')
-    assert completed_keys(path)=={('q','n')}

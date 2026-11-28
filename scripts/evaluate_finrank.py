@@ -1,4 +1,4 @@
-﻿"""Evaluate FinRank pooled retrieval and separately its fully judged in-record candidates."""
+"""Evaluate FinRank pooled retrieval and separately its fully judged in-record candidates."""
 import csv,hashlib,json,os,sys,time,uuid
 from collections import defaultdict
 from importlib.metadata import version
@@ -9,10 +9,8 @@ from rank_bm25 import BM25Okapi
 from qdrant_client import models
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-from dotenv import load_dotenv
-load_dotenv(ROOT / '.env', override=False)
-load_dotenv(ROOT.parent / '.env', override=False)
-os.environ.setdefault('HF_HOME',str(ROOT.parent/'advanced-resume-rag/data/model-cache'))
+from src.config import configure
+configure()
 from src.finrank import load_finrank
 from src.embeddings import Encoder
 from src.vector_store import Store
@@ -104,7 +102,7 @@ def run():
     manifest={'finrank_git_revision':'916dc27e77b90e294ea1b3a2cc5b0abcf07392d1','data_sha256':hashlib.sha256((ROOT/'data/raw/finrank/FinRank.jsonl').read_bytes()).hexdigest(),
         'audit':audit,'split':'official random test minus cross-split duplicate question','query_count':len(test),'corpus_size':len(docs),
         'models':{'embedding':'BAAI/bge-small-en-v1.5','reranker':'BAAI/bge-reranker-base'},
-        'model_revisions':{m:(Path(os.environ['HF_HOME'])/'hub'/('models--'+m.replace('/','--'))/'refs/main').read_text().strip() for m in ['BAAI/bge-small-en-v1.5','BAAI/bge-reranker-base']},
+        'model_revisions':{m:(Path(os.getenv('HF_HOME',str(Path.home()/'.cache/huggingface')))/'hub'/('models--'+m.replace('/','--'))/'refs/main').read_text().strip() for m in ['BAAI/bge-small-en-v1.5','BAAI/bge-reranker-base']},
         'versions':{p:version(p) for p in ['sentence-transformers','torch','qdrant-client','rank-bm25','scikit-learn','numpy']},
         'device':torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu','torch_cuda':torch.version.cuda,'qdrant':info.config.model_dump(mode='json'),
         'fixed_configuration':{'top_k_global':DEPTH,'rrf_k':60,'cross_encoder':'maximum score across explicit token windows','per_question_candidate_scope':'gold + question-specific curated negatives; Qdrant exact scoring over this judged set'},
@@ -116,6 +114,6 @@ def run():
     lines.extend('| '+' | '.join([a['method']]+[f"{a[k]:.4f}" for k in cols[1:]])+' |' for a in aggregate)
     table='\n'.join(lines)
     print('\nPer-question gold-vs-curated-negative reranking; 118 test queries\n'+table,flush=True)
-    report='# FinRank retrieval evaluation\n\n'+table+'\n\nThe table ranks each question’s annotated gold passages against its own curated hard negatives. It is not global retrieval or full SEC filing search. Metrics use binary in-record labels; P@k divides by k even when fewer than k candidates exist. Global retrieval is separately reported as known-gold recall and judged coverage in the CSV; unjudged passages are not labeled irrelevant.\n\nOfficial random test contains 119 records; one duplicated question shared with train was excluded before running the models. No train/dev tuning was performed. See PROGRESS.md and the manifest for provenance, split overlaps, all aliases, model revisions and bootstrap intervals.\n'
-    (ROOT/'FINRANK_EVALUATION.md').write_text(report,encoding='utf-8')
+    report='# FinRank retrieval evaluation\n\n'+table+'\n\nThe table ranks each question’s annotated gold passages against its own curated hard negatives. It is not global retrieval or full SEC filing search. Metrics use binary in-record labels; P@k divides by k even when fewer than k candidates exist. Global retrieval is separately reported as known-gold recall and judged coverage in the CSV; unjudged passages are not labeled irrelevant.\n\nOfficial random test contains 119 records; one duplicated question shared with train was excluded before running the models. No train/dev tuning was performed. See FINRANK_EVALUATION.md and the experiment manifest for provenance, split overlaps, model revisions and bootstrap intervals.\n'
+    (output/'finrank_retrieval_report.md').write_text(report,encoding='utf-8')
 if __name__=='__main__':run()

@@ -1,9 +1,9 @@
-﻿"""Persistent server-backed Qdrant chunk index."""
+"""Persistent server-backed Qdrant chunk index."""
 import uuid
 from qdrant_client import QdrantClient, models
 
 class Store:
-    def __init__(self, url='http://127.0.0.1:6333', collection='resume_chunks'):
+    def __init__(self, url='http://127.0.0.1:6333', collection='financial_passages'):
         if url.startswith('http://localhost:'):
             url = url.replace('http://localhost:', 'http://127.0.0.1:', 1)
         self.client = QdrantClient(url=url, timeout=60)

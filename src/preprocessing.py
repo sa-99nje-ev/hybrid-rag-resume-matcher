@@ -1,8 +1,8 @@
-﻿"""Section-aware processing with offsets into unchanged source documents."""
+"""Section-aware processing with offsets into unchanged source documents."""
 import hashlib
 import re
 
-HEADINGS = re.compile(r"(?im)^\s*(summary|profile|skills|experience|employment|education|projects|certifications|requirements|qualifications)\s*:?[ \t]*$")
+HEADINGS = re.compile(r"(?im)^\s*(overview|financial statements|balance sheets|income statements|cash flows|risk factors|notes|revenue|liabilities)\s*:?[ \t]*$")
 
 
 def stable_id(kind, source_id):

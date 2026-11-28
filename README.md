@@ -1,21 +1,62 @@
-# Financial Forensics: Evidence Retrieval and Experimental RAG
+# Financial Forensics & Evidence Intelligence
 
-This branch extends the existing resume-matching project with financial evidence retrieval, local source verification, and an experimental grounded-generation workflow. The original application and its documentation remain below. Outputs require independent review and are not financial advice or proof of a claim.
+A research system for retrieving financial filing evidence and checking numerical calculations. It combines lexical and semantic search with source citations and local Decimal arithmetic. Outputs require independent review and are not financial advice.
 
-## Checkpoint status
+## Architecture
 
-- **Completed retrieval evaluation:** 118 leakage-filtered FinRank test questions were evaluated using each question's annotated positives and curated hard negatives. The four methods' MRR / nDCG@10 were BM25 0.7756 / 0.8166, BGE dense 0.7785 / 0.8181, hybrid RRF 0.7965 / 0.8281, and hybrid RRF with cross-encoder 0.8558 / 0.8705. This is curated-candidate ranking with gold evidence present, not ordinary end-to-end retrieval or full-corpus semantic accuracy. Global-pool known-gold recall and incomplete judgment coverage are reported separately in [FINRANK_EVALUATION.md](FINRANK_EVALUATION.md).
-- **Local software tests:** the project has automated tests for retrieval, citation alignment, Decimal arithmetic, abstention, provider handling and checkpoint behavior. See [PROGRESS.md](PROGRESS.md) for the command and actual passing count at this checkpoint.
-- **Experimental financial RAG:** the pipeline combines global BM25, BGE dense search, reciprocal rank fusion and optional cross-encoder reranking with structured Groq generation. Local quotation alignment preserves the original quote and checks source spans; the numerical gate checks supported values, units and arithmetic with conservative abstention. These checks do not establish that an answer is factually supported.
-- **Incomplete generation evaluation:** the five-question development run was interrupted by provider limits after five of 15 planned method?question attempts. It is not a held-out evaluation or a generation-quality benchmark. The current citation alignment, numerical gate and rate limiter have passed local tests but have not received sufficient live validation. Numerical answer correctness remains unverified; factual grounding, calibration, independent correctness judgments and held-out generation evaluation are pending.
+1. Ingest authorized financial documents as JSONL records with `id`, `kind` set to `financial`, and `text`; section-aware chunking preserves source offsets.
+2. Retrieve with BM25 and compact BGE embeddings in persistent Qdrant, fuse rankings with reciprocal rank fusion, and rerank with the BGE cross-encoder. FAISS exact search remains available for infrastructure comparisons.
+3. Send the selected passages and question in one structured Groq request for a concise evidence plan, source quotations, extracted facts and an arithmetic expression. Document text is treated as untrusted input.
+4. Locally align quotations, check source values, fiscal periods and compatible units, and execute a restricted Decimal AST expression. Python constructs the numerical answer or returns a structured abstention. Original and verified quotations remain separately auditable.
 
-## Financial data and local execution
+Citation matching and arithmetic checks do not prove that a claim follows from a passage. Qualitative requests return cited evidence for review and abstain from a factual answer when semantic support cannot be verified. The numeric path is experimental and has not undergone independent accuracy evaluation.
 
-FinRank is an authentic research release by Mansouri and colleagues, available at [its official repository](https://github.com/datanxt/FinRank) under CC BY-NC 4.0. Its curated SEC-derived passage pool and incomplete global judgments limit the conclusions above. The original 119-question random test split included one question shared with training, which was excluded before the reported evaluation; exact passage overlap across splits remains a limitation. Follow the dataset's non-commercial and attribution terms, and evaluate third-party transmission and privacy before using a hosted model. Reference answers remain local.
+## Data, provenance and privacy
 
-FinRank data, source passages, model weights, vector storage, embedding caches, predictions, raw model responses, credentials and `.env` files are not included in the commit. The scripts under `scripts/` prepare and index locally acquired data and run the retrieval and development workflows; see [PROGRESS.md](PROGRESS.md) for recorded commands and prerequisites. The financial generation test split remains locked in the development runner. The existing `.env` is loaded locally using `HF_TOKEN` and `GROQ_API_KEY`; do not hardcode or publish credentials. Groq access is unnecessary for local tests or the completed retrieval benchmark.
+The independently checked [FinRank retrieval evaluation](FINRANK_EVALUATION.md) uses the official [FinRank release](https://github.com/datanxt/FinRank) by Mansouri and colleagues, revision `916dc27e77b90e294ea1b3a2cc5b0abcf07392d1`, under CC BY-NC 4.0 with attribution. It contains curated SEC-derived passages and question-specific judgments; it is not a complete filings corpus. Respect source rights and third-party processing terms before sending documents to a hosted API. Reference answers remain local.
 
-To run the existing automated tests in the configured environment without model downloads:
+Data, raw passages, diagnostics, credentials, model weights, embedding caches and Qdrant storage are excluded from Git. The `--allow-external-data` flag permits an API request but does not grant data rights or anonymize content. Do not commit `.env` files.
+
+## Verified retrieval results
+
+The completed evaluation used 118 leakage-filtered test questions. The following metrics rank each question's gold passages against its curated hard negatives; gold evidence is therefore present by construction. They do not measure ordinary end-to-end search accuracy.
+
+| Retrieval method | MRR | nDCG@10 |
+|---|---:|---:|
+| BM25 | 0.7756 | 0.8166 |
+| BGE dense | 0.7785 | 0.8181 |
+| Hybrid RRF | 0.7965 | 0.8281 |
+| Hybrid RRF + cross-encoder | 0.8558 | 0.8705 |
+
+The Qdrant collection held 5,230 indexed passages. Global-pool relevance judgments are incomplete; unjudged passages are not negatives. One question shared between train and test was excluded, but passage overlap across splits remains. Details, aggregate results and methodological caveats are in [FINRANK_EVALUATION.md](FINRANK_EVALUATION.md).
+
+## Installation and configuration
+
+Use Python in a virtual environment and install `requirements.txt`. Install a PyTorch build compatible with the local GPU or use CPU; see the [PyTorch installation guide](https://pytorch.org/get-started/locally/). Start a persistent Qdrant server using `docker compose up -d`, or configure the existing server. Use the existing BGE model cache when available; no model download is required for the offline tests.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+$env:FINFORENSICS_ENV_FILE = 'C:\secure\financial.env'
+$env:FINFORENSICS_MODEL_CACHE = 'C:\secure\model-cache'
+```
+
+The optional external environment file can provide `HF_TOKEN`, `GROQ_API_KEY`, `GROQ_MODEL` and standard environment settings. Set `FINFORENSICS_ENV_FILE` to its existing path before starting the program. `FINFORENSICS_MODEL_CACHE` points to an existing Hugging Face cache; otherwise the standard cache is used. Environment values take precedence over `.env` files.
+
+## Commands
+
+With an authorized local corpus and running Qdrant:
+
+```powershell
+python main.py --corpus data/processed/financial_documents.jsonl index
+python main.py --corpus data/processed/financial_documents.jsonl search "What changed in revenue?"
+python main.py --corpus data/processed/financial_documents.jsonl ask "What changed in revenue between 2022 and 2023?" --allow-external-data
+```
+
+Indexing upserts current passage identifiers and does not remove obsolete records; use a separate collection when the corpus changes. The FinRank preparation, indexing and retrieval evaluation utilities are in `scripts/`; they require locally acquired data and should not overwrite existing experiment outputs. The held-out generation split is not enabled. The optional diagnostic path must be inside the ignored `results/` directory.
+
+## Tests
 
 ```powershell
 $env:HF_HUB_OFFLINE = '1'
@@ -23,59 +64,8 @@ $env:TRANSFORMERS_OFFLINE = '1'
 python -B -m pytest -p no:cacheprovider -q
 ```
 
-## Existing resume-matching project
+The tests use local fixtures and mocked provider responses. The evidence-plan provider accepts at most one request per question; retries are disabled for this workflow.
 
-﻿# Advanced Hybrid RAG Resume–Job Intelligence
+## Limitations and future work
 
-A modular Python project for searching resume and job documents and generating evidence-linked reports. It combines BM25, BGE embeddings, persistent Qdrant retrieval, reciprocal rank fusion, a BGE cross-encoder, and Groq-assisted generation. The system supports human decision-making; ranking scores are not hiring probabilities, and missing evidence does not prove that a person lacks a skill.
-
-## Architecture
-
-1. Preserve source documents and split them into sections and passages with stable identifiers and source offsets.
-2. Encode passages with `BAAI/bge-small-en-v1.5`; use CUDA when available, fall back to CPU, and cache normalized embeddings locally.
-3. Search passages in Qdrant and documents with BM25, aggregate dense hits to documents, and fuse rankings with reciprocal rank fusion. FAISS provides an exact-search reference for indexing experiments.
-4. Optionally rerank retrieved candidates using `BAAI/bge-reranker-base`.
-5. Optionally use Groq for query expansion, structured evidence-linked generation, or a bounded read-only tool-calling workflow. Citation checks verify source identifiers and exact quotations; they do not prove semantic claim support.
-
-The CLI provides indexing, search, question answering, and an agent. Search supports BM25, dense, and hybrid modes. Question answering provides naive, hybrid, and advanced configurations. Zero-shot and stepwise prompts are implemented; few-shot prompts require independently human-verified examples with matching evidence.
-
-## Setup
-
-Use Python on Windows and install the listed dependencies in a virtual environment:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
-
-Select a PyTorch build compatible with your NVIDIA driver, or use CPU. See the [official PyTorch installation guide](https://pytorch.org/get-started/locally/). Start Qdrant using `docker compose up -d` when Docker is available. Qdrant server storage is persistent; embedded local mode must not be assumed to behave like server HNSW indexing.
-
-Copy `.env.example` to `.env` and configure the required environment variables. Keep credentials out of version control. `GROQ_MODEL` and `QDRANT_URL` are configurable. Model artifacts and embedding caches remain local.
-
-## Data and privacy
-
-No resumes, job descriptions, annotation worksheets, dataset files, model weights, vector storage, or credentials are distributed in this repository. Bring source data only after verifying its license and privacy requirements. The JSONL corpus format contains a unique `id`, `kind` (`resume` or `job`), and original `text` per document. Dataset adapters are provided in `scripts/`; preserve original files and provenance separately.
-
-The larger local experiments used the researchers' [Djinni recruitment corpus](https://aclanthology.org/2024.unlp-1.2/), published in English and Ukrainian partitions under MIT-labeled terms. The authors identify residual personal or protected attributes. A smaller separate research dataset is also documented in [DATASET_AUDIT.md](DATASET_AUDIT.md). Dataset availability or redaction does not by itself establish permission to transmit personal data to Groq. Review rights and privacy before external processing. The `--allow-external-data` option enables a request; it does not grant permission or anonymize data.
-
-## CLI
-
-With a locally prepared corpus and Qdrant server:
-
-```powershell
-python main.py --corpus data\processed\documents.jsonl --collection my_documents index
-python main.py --corpus data\processed\documents.jsonl --collection my_documents search "Python developer" --kind resume --mode hybrid
-python main.py --corpus data\processed\documents.jsonl --collection my_documents ask "Your question" --mode advanced --allow-external-data
-python main.py --corpus data\processed\documents.jsonl --collection my_documents agent "Your question" --allow-external-data
-```
-
-The indexer upserts stable chunk IDs but does not delete obsolete chunks. Use a new collection when the corpus or chunking changes. Treat source documents as untrusted data. Inspect outputs and citations before relying on them.
-
-## Verified infrastructure and evaluation status
-
-A local, fixed-seed Djinni sample of 10,000 candidate profiles and 200 jobs produced 19,988 chunks. On 200 job queries, Qdrant's nearest-neighbor agreement with FAISS exact search was 0.9990 at 10 and 0.9995 at 20. A separate filtered query incremented Qdrant's HNSW graph-search telemetry. These are infrastructure checks on one sample, not resume–job relevance or hiring accuracy; other queries may use different search plans. The sampled and earlier source-ordered runs overlap and are not independent validation splits.
-
-An RTX 4050 Laptop GPU was verified with a CUDA-enabled PyTorch environment. Naive, hybrid, advanced, and stepwise RAG and the bounded agent were demonstrated on a short public-domain U.S. Bureau of Labor Statistics passage. Source-reference checks passed on the recorded demonstrations; this is not an independent generation-quality evaluation.
-
-Independent human relevance judgments, leakage-safe validation and test splits, controlled semantic retrieval ablations, human-assessed RAG and prompt quality, and verified few-shot examples remain pending. Do not treat unjudged pairs as irrelevant, derive labels from embeddings, or use the same model as the sole judge of its answers. [ANNOTATION_GUIDE.md](ANNOTATION_GUIDE.md) describes the local human-review workflow. The experimental notebook retains its existing code and explanations; local data and result files referenced by some cells are intentionally excluded and must be prepared separately.
+Citation alignment, rate limiting and numerical verification have local test coverage but insufficient live validation. Numerical answer correctness, factual grounding, calibration and held-out generation results remain unverified. A later authorized study should complete development validation with independent judgments before any frozen held-out evaluation; do not interpret source-reference validity or ANN agreement as semantic accuracy.

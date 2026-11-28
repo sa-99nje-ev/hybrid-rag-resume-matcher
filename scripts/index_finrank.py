@@ -1,11 +1,9 @@
-﻿"""Index the official FinRank exact-text pool in a separate Qdrant collection."""
+"""Index the official FinRank exact-text pool in a separate Qdrant collection."""
 import hashlib,json,os,sys,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-from dotenv import load_dotenv
-load_dotenv(ROOT / '.env', override=False)
-load_dotenv(ROOT.parent / '.env', override=False)
-os.environ.setdefault('HF_HOME',str(ROOT.parent/'advanced-resume-rag/data/model-cache'))
+from src.config import configure
+configure()
 from src.embeddings import Encoder
 from src.vector_store import Store
 from qdrant_client import models
