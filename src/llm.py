@@ -2,6 +2,11 @@
 import json
 import os
 import time
+from pathlib import Path
+from dotenv import load_dotenv
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(_PROJECT_ROOT / '.env', override=False)
+load_dotenv(_PROJECT_ROOT.parent / '.env', override=False)
 from groq import Groq
 from pydantic import BaseModel, Field
 

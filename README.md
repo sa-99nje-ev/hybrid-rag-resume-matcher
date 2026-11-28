@@ -1,3 +1,30 @@
+# Financial Forensics: Evidence Retrieval and Experimental RAG
+
+This branch extends the existing resume-matching project with financial evidence retrieval, local source verification, and an experimental grounded-generation workflow. The original application and its documentation remain below. Outputs require independent review and are not financial advice or proof of a claim.
+
+## Checkpoint status
+
+- **Completed retrieval evaluation:** 118 leakage-filtered FinRank test questions were evaluated using each question's annotated positives and curated hard negatives. The four methods' MRR / nDCG@10 were BM25 0.7756 / 0.8166, BGE dense 0.7785 / 0.8181, hybrid RRF 0.7965 / 0.8281, and hybrid RRF with cross-encoder 0.8558 / 0.8705. This is curated-candidate ranking with gold evidence present, not ordinary end-to-end retrieval or full-corpus semantic accuracy. Global-pool known-gold recall and incomplete judgment coverage are reported separately in [FINRANK_EVALUATION.md](FINRANK_EVALUATION.md).
+- **Local software tests:** the project has automated tests for retrieval, citation alignment, Decimal arithmetic, abstention, provider handling and checkpoint behavior. See [PROGRESS.md](PROGRESS.md) for the command and actual passing count at this checkpoint.
+- **Experimental financial RAG:** the pipeline combines global BM25, BGE dense search, reciprocal rank fusion and optional cross-encoder reranking with structured Groq generation. Local quotation alignment preserves the original quote and checks source spans; the numerical gate checks supported values, units and arithmetic with conservative abstention. These checks do not establish that an answer is factually supported.
+- **Incomplete generation evaluation:** the five-question development run was interrupted by provider limits after five of 15 planned method?question attempts. It is not a held-out evaluation or a generation-quality benchmark. The current citation alignment, numerical gate and rate limiter have passed local tests but have not received sufficient live validation. Numerical answer correctness remains unverified; factual grounding, calibration, independent correctness judgments and held-out generation evaluation are pending.
+
+## Financial data and local execution
+
+FinRank is an authentic research release by Mansouri and colleagues, available at [its official repository](https://github.com/datanxt/FinRank) under CC BY-NC 4.0. Its curated SEC-derived passage pool and incomplete global judgments limit the conclusions above. The original 119-question random test split included one question shared with training, which was excluded before the reported evaluation; exact passage overlap across splits remains a limitation. Follow the dataset's non-commercial and attribution terms, and evaluate third-party transmission and privacy before using a hosted model. Reference answers remain local.
+
+FinRank data, source passages, model weights, vector storage, embedding caches, predictions, raw model responses, credentials and `.env` files are not included in the commit. The scripts under `scripts/` prepare and index locally acquired data and run the retrieval and development workflows; see [PROGRESS.md](PROGRESS.md) for recorded commands and prerequisites. The financial generation test split remains locked in the development runner. The existing `.env` is loaded locally using `HF_TOKEN` and `GROQ_API_KEY`; do not hardcode or publish credentials. Groq access is unnecessary for local tests or the completed retrieval benchmark.
+
+To run the existing automated tests in the configured environment without model downloads:
+
+```powershell
+$env:HF_HUB_OFFLINE = '1'
+$env:TRANSFORMERS_OFFLINE = '1'
+python -B -m pytest -p no:cacheprovider -q
+```
+
+## Existing resume-matching project
+
 ﻿# Advanced Hybrid RAG Resume–Job Intelligence
 
 A modular Python project for searching resume and job documents and generating evidence-linked reports. It combines BM25, BGE embeddings, persistent Qdrant retrieval, reciprocal rank fusion, a BGE cross-encoder, and Groq-assisted generation. The system supports human decision-making; ranking scores are not hiring probabilities, and missing evidence does not prove that a person lacks a skill.

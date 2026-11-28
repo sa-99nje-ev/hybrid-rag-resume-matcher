@@ -14,3 +14,8 @@ pyyaml>=6
 
 
 pyarrow>=15
+rank-bm25>=0.2.2,<0.3
+scikit-learn>=1.4,<2
+nltk>=3.10,<4
+rouge-score==0.1.2
+bert-score==0.3.13
