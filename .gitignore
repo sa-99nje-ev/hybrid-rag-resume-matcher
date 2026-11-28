@@ -3,6 +3,13 @@
 !.env.example
 __pycache__/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+*.py[cod]
+*.log
 data/
 results/*
 !results/.gitkeep
